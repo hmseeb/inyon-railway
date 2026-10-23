@@ -1,5 +1,5 @@
 #!/bin/bash
-# Boot order: hub on loopback first, claim it, and only then Caddy on $PORT, so a green
+# Boot order: password, then the hub on loopback, and only then Caddy on $PORT, so a green
 # healthcheck means the hub itself answers (not just a proxy in front of nothing).
 set -euo pipefail
 
@@ -22,6 +22,26 @@ git config --global init.defaultBranch main >/dev/null 2>&1 || true
 # sends Host: healthcheck.railway.app.
 export INYON_ALLOWED_HOSTS="${INYON_ALLOWED_HOSTS:+$INYON_ALLOWED_HOSTS,}healthcheck.railway.app"
 
+# INYON_PASSWORD becomes the hub's password whenever the variable changes: applied before the hub
+# starts, with the hub's own reset-password (which signs everyone out). A change made in Settings
+# stays until the variable is edited again. Only a salted hash of the last applied value is kept.
+applied="$INYON_DATA_DIR/railway-password"
+if [ -n "${INYON_PASSWORD:-}" ]; then
+  salt=$(cut -d' ' -f1 "$applied" 2>/dev/null || true)
+  [ -n "$salt" ] || salt=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+  sum=$(printf '%s%s' "$salt" "$INYON_PASSWORD" | sha256sum | cut -c1-64)
+  if [ "$(cat "$applied" 2>/dev/null || true)" != "$salt $sum" ]; then
+    # through the environment, so the password never shows in the process list
+    if out=$(INYON_NEW_PASSWORD="$INYON_PASSWORD" inyon-engine hub reset-password 2>&1); then
+      (umask 077; echo "$salt $sum" > "$applied")
+      echo "==> password set from INYON_PASSWORD"
+    else
+      # keep the deploy healthy; the hub keeps the password it had
+      echo "WARNING: INYON_PASSWORD was not applied: $out" >&2
+    fi
+  fi
+fi
+
 pids=()
 trap 'kill "${pids[@]}" 2>/dev/null || true' TERM INT
 
@@ -32,25 +52,6 @@ pids+=($!)
 session() { curl -fsS -m 3 "http://127.0.0.1:$HUB_PORT/api/session" 2>/dev/null; }
 for _ in $(seq 1 120); do session >/dev/null && break; sleep 0.5; done
 session >/dev/null || { echo "FATAL: hub did not answer on 127.0.0.1:$HUB_PORT within 60s" >&2; exit 1; }
-
-# First boot only: set the password from INYON_PASSWORD with the hub's own one-time setup
-# code, over loopback, so a fresh public URL is never left waiting for its first visitor.
-if session | grep -q '"setup":true'; then
-  code_file="$INYON_DATA_DIR/setup-code"
-  if [ -n "${INYON_PASSWORD:-}" ] && [ -s "$code_file" ]; then
-    pw=$(printf '%s' "$INYON_PASSWORD" | sed 's/\\/\\\\/g; s/"/\\"/g')
-    body=$(printf '{"password":"%s","code":"%s"}' "$pw" "$(tr -d '[:space:]' < "$code_file")")
-    out=$(curl -sS -m 10 -X POST -H 'Content-Type: application/json' --data-binary "$body" \
-            "http://127.0.0.1:$HUB_PORT/api/setup" 2>&1) || true
-    case "$out" in
-      *'"ok":true'*) echo "==> hub claimed: sign in with the password in INYON_PASSWORD" ;;
-      # keep the deploy healthy: the hub falls back to its own first visit, which needs the setup code
-      *) echo "WARNING: the hub refused INYON_PASSWORD ($out). Open the hub and choose a password (8 to 1024 characters) with the setup code above." >&2 ;;
-    esac
-  else
-    echo "==> INYON_PASSWORD is empty: open the hub and use the setup code above to choose a password"
-  fi
-fi
 
 caddy run --config /etc/inyon/Caddyfile --adapter caddyfile &
 pids+=($!)

@@ -61,18 +61,32 @@ lp=$(docker exec -u inyon "$NAME" bash -lc 'echo $PATH')
 p=$(edge "http://127.0.0.1:$PORT/")
 [[ $p == *'<div id="root"'* || $p == *'<script'* ]] && ok "web app served" || no "web app: ${p:0:200}"
 
+login() { local pw=$1; shift; edge -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: https://$HOST" \
+            --data "{\"password\":\"$pw\"}" "$@" "http://127.0.0.1:$PORT/api/login" 2>/dev/null; }
+# same volume, new container: what a Railway redeploy (or a variable edit) does
+redeploy() { docker rm -f "$NAME" >/dev/null; PW=$1 run; }
+
 docker restart "$NAME" >/dev/null
 for _ in $(seq 1 60); do curl -fs -o /dev/null -H "Host: $HOST" "http://127.0.0.1:$PORT/api/session" && break; sleep 1; done
-c=$(edge -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: https://$HOST" \
-      --data "{\"password\":\"$PW\"}" "http://127.0.0.1:$PORT/api/login")
-[ "$c" = 200 ] && ok "password survives a restart (volume)" || no "after restart login got $c"
+[ "$(login "$PW")" = 200 ] && ok "password survives a restart (volume)" || no "after restart login failed"
 
-# A password the hub refuses must not fail the deploy: the hub stays up and waits for its first
-# visit, which needs the setup code from the logs
-docker run -d --name "$NAME-short" -p 127.0.0.1:18081:8080 -e INYON_PASSWORD=short -e INYON_ALLOWED_HOSTS="$HOST" "$IMG" >/dev/null
-s=""; for _ in $(seq 1 60); do s=$(curl -fs -H "Host: $HOST" http://127.0.0.1:18081/api/session) && break; sleep 1; done
-[[ $s == *'"setup":true'* ]] && docker logs "$NAME-short" 2>&1 | grep -q 'WARNING: the hub refused INYON_PASSWORD' \
-  && ok "short password keeps the hub up, waiting for the setup code" || no "short password: $s $(docker logs "$NAME-short" 2>&1 | tail -2)"
-docker rm -f "$NAME-short" >/dev/null 2>&1
+# A password changed in Settings survives a redeploy while the variable is unchanged
+# the cookie is Secure, so curl won't keep it over http: carry it by hand
+ck=$(edge -D - -o /dev/null -X POST -H 'Content-Type: application/json' -H "Origin: https://$HOST" \
+       --data "{\"password\":\"$PW\"}" "http://127.0.0.1:$PORT/api/login" | sed -n 's/^[Ss]et-[Cc]ookie: *\([^;]*\).*/\1/p')
+edge -H "Cookie: $ck" -o /dev/null -X POST -H 'Content-Type: application/json' -H "Origin: https://$HOST" \
+  --data "{\"current\":\"$PW\",\"next\":\"changed-in-settings\"}" "http://127.0.0.1:$PORT/api/password"
+redeploy "$PW"
+[ "$(login changed-in-settings)" = 200 ] && ok "Settings password kept while INYON_PASSWORD is unchanged" || no "Settings password lost on redeploy"
+
+# Editing the variable replaces the password on the next deploy
+redeploy edited-in-railway
+[ "$(login edited-in-railway)" = 200 ] && [ "$(login changed-in-settings)" = 401 ] \
+  && ok "an edited INYON_PASSWORD replaces the password" || no "variable edit not applied"
+
+# A value the hub refuses keeps the deploy up and the old password working
+redeploy short
+[ "$(login edited-in-railway)" = 200 ] && docker logs "$NAME" 2>&1 | grep -q 'WARNING: INYON_PASSWORD was not applied' \
+  && ok "a too-short INYON_PASSWORD is skipped with a warning" || no "short password: $(docker logs "$NAME" 2>&1 | tail -2)"
 
 [ $fail = 0 ] && echo "all green" || { docker logs "$NAME" 2>&1 | tail -30; exit 1; }
