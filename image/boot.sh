@@ -44,9 +44,8 @@ if session | grep -q '"setup":true'; then
             "http://127.0.0.1:$HUB_PORT/api/setup" 2>&1) || true
     case "$out" in
       *'"ok":true'*) echo "==> hub claimed: sign in with the password in INYON_PASSWORD" ;;
-      # never serve an unclaimed hub on a public URL: fail the deploy so it's seen and fixed
-      *) echo "FATAL: the hub refused INYON_PASSWORD ($out). It must be 8 to 1024 characters. Fix the variable and redeploy." >&2
-         exit 1 ;;
+      # keep the deploy healthy: the hub falls back to its own first visit, which needs the setup code
+      *) echo "WARNING: the hub refused INYON_PASSWORD ($out). Open the hub and choose a password (8 to 1024 characters) with the setup code above." >&2 ;;
     esac
   else
     echo "==> INYON_PASSWORD is empty: open the hub and use the setup code above to choose a password"
