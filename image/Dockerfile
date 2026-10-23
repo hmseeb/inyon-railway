@@ -34,7 +34,9 @@ COPY boot.sh /usr/local/bin/inyon-boot
 
 # Not root: Claude Code refuses --dangerously-skip-permissions as root, and the hub hands out
 # a shell as this user. boot.sh starts as root only to chown the Railway volume, then drops.
-RUN useradd -m -u 1000 -s /bin/bash inyon
+RUN useradd -m -u 1000 -s /bin/bash inyon \
+ # tmux panes run login shells, and Debian's /etc/profile resets PATH: keep the agents' installs on it
+ && echo 'export PATH="$HOME/.local/bin:$HOME/.inyon/bin:$PATH"' > /etc/profile.d/inyon-path.sh
 ENV HOME=/data/home \
     INYON_DATA_DIR=/data/home/.inyon \
     PATH=/data/home/.local/bin:/data/home/.inyon/bin:/usr/local/bin:/usr/bin:/bin \

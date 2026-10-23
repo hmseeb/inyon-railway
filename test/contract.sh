@@ -53,6 +53,10 @@ u=$(docker exec "$NAME" ps -o user= -C inyon-engine | head -1)
 
 docker exec "$NAME" sh -c 'command -v tmux git ssh' >/dev/null && ok "tmux, git, ssh present" || no "tools missing"
 
+# agents install to ~/.local/bin; tmux panes are login shells, so it must survive /etc/profile
+lp=$(docker exec -u inyon "$NAME" bash -lc 'echo $PATH')
+[[ $lp == *"/data/home/.local/bin"* ]] && ok "login shells keep ~/.local/bin on PATH" || no "login PATH: $lp"
+
 # The hub's own page must load through the proxy (web app embedded in the engine)
 p=$(edge "http://127.0.0.1:$PORT/")
 [[ $p == *'<div id="root"'* || $p == *'<script'* ]] && ok "web app served" || no "web app: ${p:0:200}"
