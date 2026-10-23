@@ -1,0 +1,39 @@
+name: Build and push image
+
+on:
+  push:
+    branches: [main]
+    paths: ["image/**", ".github/workflows/build.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Contract test
+        run: |
+          docker build -t inyon-railway:test image
+          test/contract.sh inyon-railway:test
+      - uses: docker/build-push-action@v6
+        with:
+          context: image
+          push: true
+          # Railway runs amd64.
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/inyon-railway:0.20.2-r1
+            ghcr.io/${{ github.repository_owner }}/inyon-railway:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
