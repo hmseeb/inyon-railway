@@ -33,7 +33,7 @@ jobs:
           # Railway runs amd64.
           platforms: linux/amd64
           tags: |
-            ghcr.io/${{ github.repository_owner }}/inyon-railway:0.20.2-r3
+            ghcr.io/${{ github.repository_owner }}/inyon-railway:0.20.2-r4
             ghcr.io/${{ github.repository_owner }}/inyon-railway:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max

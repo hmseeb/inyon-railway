@@ -67,4 +67,11 @@ c=$(edge -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/js
       --data "{\"password\":\"$PW\"}" "http://127.0.0.1:$PORT/api/login")
 [ "$c" = 200 ] && ok "password survives a restart (volume)" || no "after restart login got $c"
 
+# A password the hub rejects must fail the deploy, never leave an unclaimed hub on a public URL
+docker run --name "$NAME-short" -e INYON_PASSWORD=short -e INYON_ALLOWED_HOSTS="$HOST" "$IMG" >/tmp/$NAME-short.log 2>&1
+rc=$?; docker rm -f "$NAME-short" >/dev/null 2>&1
+[ $rc != 0 ] && grep -q 'FATAL: the hub refused INYON_PASSWORD' /tmp/$NAME-short.log \
+  && ok "short password fails the boot (exit $rc)" || no "short password: exit $rc, $(tail -2 /tmp/$NAME-short.log)"
+rm -f /tmp/$NAME-short.log
+
 [ $fail = 0 ] && echo "all green" || { docker logs "$NAME" 2>&1 | tail -30; exit 1; }

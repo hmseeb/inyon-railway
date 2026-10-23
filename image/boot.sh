@@ -40,13 +40,14 @@ if session | grep -q '"setup":true'; then
   if [ -n "${INYON_PASSWORD:-}" ] && [ -s "$code_file" ]; then
     pw=$(printf '%s' "$INYON_PASSWORD" | sed 's/\\/\\\\/g; s/"/\\"/g')
     body=$(printf '{"password":"%s","code":"%s"}' "$pw" "$(tr -d '[:space:]' < "$code_file")")
-    if out=$(curl -sS -m 10 -X POST -H 'Content-Type: application/json' --data-binary "$body" \
-               "http://127.0.0.1:$HUB_PORT/api/setup"); then
-      case "$out" in
-        *'"ok":true'*) echo "==> hub claimed: sign in with the INYON_PASSWORD variable" ;;
-        *) echo "WARNING: could not set the password from INYON_PASSWORD: $out" >&2 ;;
-      esac
-    fi
+    out=$(curl -sS -m 10 -X POST -H 'Content-Type: application/json' --data-binary "$body" \
+            "http://127.0.0.1:$HUB_PORT/api/setup" 2>&1) || true
+    case "$out" in
+      *'"ok":true'*) echo "==> hub claimed: sign in with the password in INYON_PASSWORD" ;;
+      # never serve an unclaimed hub on a public URL: fail the deploy so it's seen and fixed
+      *) echo "FATAL: the hub refused INYON_PASSWORD ($out). It must be 8 to 1024 characters. Fix the variable and redeploy." >&2
+         exit 1 ;;
+    esac
   else
     echo "==> INYON_PASSWORD is empty: open the hub and use the setup code above to choose a password"
   fi
