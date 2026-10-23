@@ -17,7 +17,8 @@ run() {
     -e INYON_PASSWORD="$PW" -e INYON_ALLOWED_HOSTS="$HOST" "$IMG" >/dev/null
   for _ in $(seq 1 60); do curl -fs -o /dev/null -H "Host: $HOST" "http://127.0.0.1:$PORT/api/session" && return; sleep 1; done
 }
-edge() { curl -s -H "Host: $HOST" -H "X-Forwarded-Proto: https" -H "X-Forwarded-For: 9.9.9.9, 203.0.113.7" "$@"; }
+# What Railway's edge sends: XFF "<client>, <edge ip>" and X-Real-IP <client>
+edge() { curl -s -H "Host: $HOST" -H "X-Forwarded-Proto: https" -H "X-Forwarded-For: 203.0.113.7, 100.64.0.${EDGE:-1}" -H "X-Real-IP: 203.0.113.7" "$@"; }
 cleanup() { docker rm -f "$NAME" >/dev/null 2>&1; docker volume rm "$VOL" >/dev/null 2>&1; }
 trap cleanup EXIT
 
@@ -38,6 +39,14 @@ grep -qi '^set-cookie:.*secure' <<<"$h" && ok "sign-in works and the cookie is S
 c=$(edge -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: https://$HOST" \
       --data '{"password":"wrong-password"}' "http://127.0.0.1:$PORT/api/login")
 [ "$c" = 401 ] && ok "wrong password refused" || no "wrong password got $c"
+
+# Sign-in limit counts the client, not the edge hop that varies per request
+last=""
+for i in $(seq 1 9); do
+  last=$(EDGE=$i edge -X POST -H 'Content-Type: application/json' -H "Origin: https://$HOST" \
+           --data '{"password":"wrong-password"}' "http://127.0.0.1:$PORT/api/login")
+done
+[[ $last == *'Too many'* ]] && ok "sign-in limit is per client across edge hops" || no "9th wrong password: $last"
 
 u=$(docker exec "$NAME" ps -o user= -C inyon-engine | head -1)
 [ "$u" = inyon ] && ok "hub runs as the inyon user" || no "hub runs as '$u'"

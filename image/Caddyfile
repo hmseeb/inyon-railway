@@ -6,9 +6,11 @@
 :{$PORT} {
 	reverse_proxy 127.0.0.1:4777 {
 		# The hub trusts forwarded headers only from loopback, and takes the LAST X-Forwarded-For
-		# entry as the client (apps/hub clientAddress). Pass the edge's own headers through as-is:
-		# Railway's edge appends the real client last, so a spoofed entry lands in front of it.
-		header_up X-Forwarded-For {http.request.header.X-Forwarded-For}
+		# entry as the client (apps/hub clientAddress). Railway's edge sends "<client>, <edge ip>"
+		# (the edge ip varies per request, which would defeat per-client sign-in limits) and
+		# overwrites X-Real-IP with the client, ignoring any value the client sent (measured
+		# 2026-10-24). So the hub gets exactly one entry: X-Real-IP.
+		header_up X-Forwarded-For {http.request.header.X-Real-IP}
 		header_up X-Forwarded-Proto {http.request.header.X-Forwarded-Proto}
 	}
 }
