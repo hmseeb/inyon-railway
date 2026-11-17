@@ -62,8 +62,9 @@ lp=$(docker exec -u inyon "$NAME" bash -lc 'echo $PATH')
 code=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: anything.example.org" "http://127.0.0.1:$PORT/healthz")
 [ "$code" = 200 ] && ok "/healthz answers under any Host" || no "/healthz got $code"
 
-# INYON_PASSWORD never reaches the start script's or the hub's environment (tmux and agents inherit it)
-env_of=$(docker exec "$NAME" sh -c 'for p in 1 $(pgrep -x inyon; pgrep -x inyon-engine); do tr "\0" "\n" < /proc/$p/environ; done')
+# INYON_PASSWORD never reaches the start script's or the hub's environment (tmux and agents inherit it).
+# As the inyon user: Docker drops CAP_SYS_PTRACE, so root can't read another uid's /proc/*/environ.
+env_of=$(docker exec -u inyon "$NAME" sh -c 'for p in 1 $(pgrep -x inyon; pgrep -x inyon-engine); do tr "\0" "\n" < /proc/$p/environ; done')
 [ -n "$env_of" ] && ! grep -q '^INYON_PASSWORD=' <<<"$env_of" && ok "INYON_PASSWORD is not in the boot or hub environment" || no "INYON_PASSWORD still in a process environment"
 
 # The hub's own page must load through the proxy (web app embedded in the engine)
